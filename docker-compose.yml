@@ -1,67 +1,84 @@
 version: '3.8'
+
+# Common environment variables
 x-common:
   database:
     &db-environment
-    # Do not remove the "&db-password" from the end of the line below, it is important
-    # for Panel functionality.
-    MYSQL_PASSWORD: &db-password "CHANGE_ME"
-    MYSQL_ROOT_PASSWORD: "CHANGE_ME_TOO"
+    MYSQL_PASSWORD: &db-password "CHANGE_ME"  # IMPORTANT: Change this!
+    MYSQL_ROOT_PASSWORD: "CHANGE_ME_TOO"      # IMPORTANT: Change this!
+    MYSQL_DATABASE: "panel"
+    MYSQL_USER: "pterodactyl"
+  
   panel:
     &panel-environment
-    # This URL should be the URL that your reverse proxy routes to the panel server
-    APP_URL: "https://pterodactyl.example.com"
-    # A list of valid timezones can be found here: http://php.net/manual/en/timezones.php
-    APP_TIMEZONE: "UTC"
-    APP_SERVICE_AUTHOR: "noreply@example.com"
-    TRUSTED_PROXIES: "*" # Set this to your proxy IP
-    # Uncomment the line below and set to a non-empty value if you want to use Let's Encrypt
-    # to generate an SSL certificate for the Panel.
-    # LE_EMAIL: ""
+    # Change this to your actual domain
+    APP_URL: "https://panel.example.com"
+    APP_TIMEZONE: "UTC"  # Change to your timezone, e.g., "Asia/Jakarta"
+    APP_SERVICE_AUTHOR: "noreply@example.com"  # Change to your email
+    TRUSTED_PROXIES: "*"  # Set to your proxy IP for security
+    # Uncomment for Let's Encrypt SSL
+    # LE_EMAIL: "admin@example.com"
+  
   mail:
     &mail-environment
-    MAIL_FROM: "noreply@example.com"
+    MAIL_FROM: "noreply@example.com"  # Change to your email
     MAIL_DRIVER: "smtp"
-    MAIL_HOST: "mail"
-    MAIL_PORT: "1025"
-    MAIL_USERNAME: ""
-    MAIL_PASSWORD: ""
-    MAIL_ENCRYPTION: "true"
+    MAIL_HOST: "smtp.gmail.com"  # Or your mail server
+    MAIL_PORT: "587"
+    MAIL_USERNAME: ""  # Your email username
+    MAIL_PASSWORD: ""  # Your email password
+    MAIL_ENCRYPTION: "tls"  # tls or ssl
 
-#
-# ------------------------------------------------------------------------------------------
-# DANGER ZONE BELOW
-#
-# The remainder of this file likely does not need to be changed. Please only make modifications
-# below if you understand what you are doing.
-#
 services:
+  # Database Service - Updated to latest stable MariaDB
   database:
-    image: mariadb:10.5
-    restart: always
+    image: mariadb:10.11  # Latest stable LTS version
+    restart: unless-stopped
     command: --default-authentication-plugin=mysql_native_password
     volumes:
-      - "/srv/pterodactyl/database:/var/lib/mysql"
+      - "db_data:/var/lib/mysql"
     environment:
       <<: *db-environment
-      MYSQL_DATABASE: "panel"
-      MYSQL_USER: "pterodactyl"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    networks:
+      - pterodactyl_network
+
+  # Cache Service - Using Redis Alpine for minimal size
   cache:
-    image: redis:alpine
-    restart: always
+    image: redis:7-alpine  # Latest stable Redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - "cache_data:/data"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 20s
+      retries: 10
+    networks:
+      - pterodactyl_network
+
+  # Panel Service - Latest version with security improvements
   panel:
     image: ghcr.io/pterodactyl/panel:latest
-    restart: always
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    links:
-      - database
-      - cache
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
     volumes:
-      - "/srv/pterodactyl/var/:/app/var/"
-      - "/srv/pterodactyl/nginx/:/etc/nginx/http.d/"
-      - "/srv/pterodactyl/certs/:/etc/letsencrypt/"
-      - "/srv/pterodactyl/logs/:/app/storage/logs"
+      - "panel_data:/app/var/"
+      - "nginx_config:/etc/nginx/http.d/"
+      - "ssl_certs:/etc/letsencrypt/"
+      - "panel_logs:/app/storage/logs"
+      # Optional: Mount custom nginx configs
+      # - "./nginx/custom.conf:/etc/nginx/conf.d/custom.conf"
     environment:
       <<: [*panel-environment, *mail-environment]
       DB_PASSWORD: *db-password
@@ -71,10 +88,35 @@ services:
       SESSION_DRIVER: "redis"
       QUEUE_DRIVER: "redis"
       REDIS_HOST: "cache"
+      REDIS_PORT: 6379
       DB_HOST: "database"
-      DB_PORT: "3306"
+      DB_PORT: 3306
+      # Security & Performance
+      APP_DEBUG: "false"
+      APP_LOG_LEVEL: "error"
+    networks:
+      - pterodactyl_network
+
+# Named volumes for better data management
+volumes:
+  db_data:
+    name: pterodactyl_db_data
+  cache_data:
+    name: pterodactyl_cache_data
+  panel_data:
+    name: pterodactyl_panel_data
+  nginx_config:
+    name: pterodactyl_nginx_config
+  ssl_certs:
+    name: pterodactyl_ssl_certs
+  panel_logs:
+    name: pterodactyl_panel_logs
+
+# Network configuration
 networks:
-  default:
+  pterodactyl_network:
+    name: pterodactyl_network
+    driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/16
