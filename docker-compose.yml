@@ -1,38 +1,38 @@
 version: '3.8'
 
-# Common environment variables
+# Common environment variables for Codespaces
 x-common:
   database:
     &db-environment
-    MYSQL_PASSWORD: &db-password "CHANGE_ME"  # IMPORTANT: Change this!
-    MYSQL_ROOT_PASSWORD: "CHANGE_ME_TOO"      # IMPORTANT: Change this!
+    MYSQL_PASSWORD: &db-password "pterodactyl_pass_2026"
+    MYSQL_ROOT_PASSWORD: "root_pass_2026"
     MYSQL_DATABASE: "panel"
     MYSQL_USER: "pterodactyl"
   
   panel:
     &panel-environment
-    # Change this to your actual domain
-    APP_URL: "https://panel.example.com"
-    APP_TIMEZONE: "UTC"  # Change to your timezone, e.g., "Asia/Jakarta"
-    APP_SERVICE_AUTHOR: "noreply@example.com"  # Change to your email
-    TRUSTED_PROXIES: "*"  # Set to your proxy IP for security
-    # Uncomment for Let's Encrypt SSL
+    # Codespaces URL - Important: This must match your forwarded port URL
+    APP_URL: "https://${CODESPACE_NAME}-80.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+    APP_TIMEZONE: "UTC"
+    APP_SERVICE_AUTHOR: "noreply@localhost"
+    TRUSTED_PROXIES: "*"
+    # For Codespaces, we'll use HTTP for simplicity
     # LE_EMAIL: "admin@example.com"
   
   mail:
     &mail-environment
-    MAIL_FROM: "noreply@example.com"  # Change to your email
-    MAIL_DRIVER: "smtp"
-    MAIL_HOST: "smtp.gmail.com"  # Or your mail server
-    MAIL_PORT: "587"
-    MAIL_USERNAME: ""  # Your email username
-    MAIL_PASSWORD: ""  # Your email password
-    MAIL_ENCRYPTION: "tls"  # tls or ssl
+    MAIL_FROM: "noreply@localhost"
+    MAIL_DRIVER: "log"  # Use log driver for Codespaces
+    MAIL_HOST: "localhost"
+    MAIL_PORT: "1025"
+    MAIL_USERNAME: ""
+    MAIL_PASSWORD: ""
+    MAIL_ENCRYPTION: "null"
 
 services:
-  # Database Service - Updated to latest stable MariaDB
+  # Database Service
   database:
-    image: mariadb:10.11  # Latest stable LTS version
+    image: mariadb:10.11
     restart: unless-stopped
     command: --default-authentication-plugin=mysql_native_password
     volumes:
@@ -46,9 +46,9 @@ services:
     networks:
       - pterodactyl_network
 
-  # Cache Service - Using Redis Alpine for minimal size
+  # Cache Service
   cache:
-    image: redis:7-alpine  # Latest stable Redis
+    image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --save 60 1 --loglevel warning
     volumes:
@@ -60,7 +60,7 @@ services:
     networks:
       - pterodactyl_network
 
-  # Panel Service - Latest version with security improvements
+  # Panel Service - Fixed for Codespaces
   panel:
     image: ghcr.io/pterodactyl/panel:latest
     restart: unless-stopped
@@ -77,13 +77,13 @@ services:
       - "nginx_config:/etc/nginx/http.d/"
       - "ssl_certs:/etc/letsencrypt/"
       - "panel_logs:/app/storage/logs"
-      # Optional: Mount custom nginx configs
-      # - "./nginx/custom.conf:/etc/nginx/conf.d/custom.conf"
     environment:
       <<: [*panel-environment, *mail-environment]
       DB_PASSWORD: *db-password
-      APP_ENV: "production"
+      APP_ENV: "local"
       APP_ENVIRONMENT_ONLY: "false"
+      APP_DEBUG: "true"  # Enable for debugging in Codespaces
+      APP_LOG_LEVEL: "debug"
       CACHE_DRIVER: "redis"
       SESSION_DRIVER: "redis"
       QUEUE_DRIVER: "redis"
@@ -91,32 +91,21 @@ services:
       REDIS_PORT: 6379
       DB_HOST: "database"
       DB_PORT: 3306
-      # Security & Performance
-      APP_DEBUG: "false"
-      APP_LOG_LEVEL: "error"
+      # Codespaces specific
+      TRUSTED_PROXIES: "*"
     networks:
       - pterodactyl_network
 
-# Named volumes for better data management
+# Volumes
 volumes:
   db_data:
-    name: pterodactyl_db_data
   cache_data:
-    name: pterodactyl_cache_data
   panel_data:
-    name: pterodactyl_panel_data
   nginx_config:
-    name: pterodactyl_nginx_config
   ssl_certs:
-    name: pterodactyl_ssl_certs
   panel_logs:
-    name: pterodactyl_panel_logs
 
-# Network configuration
+# Network
 networks:
   pterodactyl_network:
-    name: pterodactyl_network
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
